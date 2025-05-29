@@ -1,0 +1,1657 @@
+<script>
+	// 合并nezha主题配置
+	window.$mergeNazhuaConfig && window.$mergeNazhuaConfig({
+		homeWorldMapPosition: "bottom",
+		detailWorldMapPosition: 'bottom',
+		hideDetailWorldMap: false,
+		enableInnerSearch: false,
+		listServerItemType: 'card',
+		simpleColorMode: true,
+		hideListItemStatusDonut: false,
+		lightBackground: true,
+		hideFilter: true,
+		customBackgroundImage: "https://static.08310507.xyz/bg1.png"
+	})
+	// 服务器信息
+	window.__ServerInfo = [
+		{
+			id: 1,
+			name: '服务A',
+			billing: {
+				startDate: '2025-05-14',
+				endDate: '2025-06-14',
+				month: true,
+				amount: 2.63
+			},
+			bandwidth: 200,
+			trafficVol: 2000,
+			ipCheckReportHash: [
+				'3FL480GSY'
+			]
+		},
+		{
+			id: 13,
+			name: '服务B',
+			billing: {
+				startDate: '2025-05-14',
+				endDate: '2025-06-14',
+				year: true,
+				amount: 6
+			},
+			bandwidth: 1000,
+			trafficVol: 2000,
+			ipCheckReportHash: [
+				'36Z23PMVB'
+			]
+		}
+	]
+</script>
+
+<!-- 加载tailwindcss -->
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+
+<!-- 账单信息模板 -->
+<template id="billing-info-template">
+	<div class="w-full cursor-default">
+		<!-- 顶部：价格和剩余时间 -->
+		<div class="flex items-center justify-between mb-3">
+			<!-- 剩余时间 -->
+			<div class="flex items-center gap-1.5 text-sm text-gray-400"
+				 :title="billing.startDate + ' - ' + billing.endDate">
+				<i class="ri-hourglass-fill text-blue-400"></i>
+				<span>剩余</span>
+				<span class="font-semibold">{{ calculateRemainingDays(billing) }}</span>
+				<span class="text-xs text-gray-500" v-if="billing.endDate">（{{ billing.startDate }} - {{ billing.endDate }}）</span>
+				<span class="text-xs text-gray-500" v-else>（{{ billing.startDate }}购入）</span>
+			</div>
+			<!-- 价格 -->
+			<div class="flex items-center gap-2">
+				<div class="flex items-center">
+					<div class="text-lg font-bold text-gray-400 cursor-pointer hover:text-white hover:underline"
+						 @click="togglePriceType">
+						{{ price }}
+					</div>
+					<span class="text-lg font-bold text-gray-500">/</span>
+					<div class="text-lg font-bold text-gray-400 cursor-pointer hover:text-white hover:underline"
+						 @click="toggleCycle">
+						{{ cycle }}
+					</div>
+				</div>
+				<div v-if="info.billing.month"
+					 class="px-2 py-0.5 bg-green-500/20 text-green-400 text-xs rounded-full border border-green-500/30">
+					月付
+				</div>
+				<div v-if="info.billing.year"
+					 class="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded-full border border-yellow-500/30">
+					年付
+				</div>
+			</div>
+		</div>
+		<!-- 底部：配置信息网格 -->
+		<div class="grid grid-cols-2 gap-2">
+			<!-- 带宽 -->
+			<div class="flex items-center gap-2 px-2 py-1.5 bg-white/5 rounded-md">
+				<i class="ri-speed-line text-blue-400 text-sm"></i>
+				<div class="flex flex-col text-gray-400">
+					<span class="text-xs">带宽</span>
+					<span class="text-sm font-medium">{{ bandwidth() }}</span>
+				</div>
+			</div>
+			<!-- 流量 -->
+			<div class="flex items-center gap-2 px-2 py-1.5 bg-white/5 rounded-md">
+				<i class="ri-database-line text-green-400 text-sm"></i>
+				<div class="flex flex-col text-gray-400">
+					<span class="text-xs">流量</span>
+					<span class="text-sm font-medium">{{ trafficVol() }}</span>
+				</div>
+			</div>
+		</div>
+	</div>
+</template>
+
+<!-- 账单信息组件 -->
+<script type="module">
+	function registerBillingComponent(app, element, emitter, exchangeRateMap) {
+		const { ref, computed, onMounted, onUnmounted, nextTick } = Vue
+		app.component('billing-info', {
+			template: document.getElementById('billing-info-template').innerHTML,
+			props: {
+				server: { type: Object, required: true },
+				info: { type: Object, required: true }
+			},
+			setup(props) {
+				const priceType = ref('$')
+				const cycle = ref('Monthly')
+				const price = computed(() => {
+					if (props.info.billing.free) {
+						return '免费'
+					}
+					let amount = 0
+					if (priceType.value === '$') {
+						amount = props.info.billing.amount
+					} else {
+						const cny = exchangeRateMap ? exchangeRateMap['cny'] : 7.2
+						amount = props.info.billing.amount * cny
+					}
+					if (cycle.value === 'Yearly') {
+						amount = amount * 12
+					}
+					return `${amount.toFixed(2)}${priceType.value}`
+				})
+				emitter.on('change-price-type', props.info.id, (v) => {
+					priceType.value = v
+				})
+				emitter.on('change-cycle', props.info.id, (v) => {
+					cycle.value = v
+				})
+				return {
+					billing: props.info.billing,
+					price,
+					cycle,
+					togglePriceType() {
+						priceType.value = priceType.value === '$' ? '￥' : '$'
+						emitter.emit('change-price-type', priceType.value)
+					},
+					toggleCycle() {
+						cycle.value = cycle.value === 'Monthly' ? 'Yearly' : 'Monthly'
+						emitter.emit('change-cycle', cycle.value)
+					},
+					bandwidth() {
+						if (props.info.bandwidth) {
+							if (props.info.bandwidth > 1000) {
+								return (props.info.bandwidth / 1000).toFixed(2) + 'Gbps'
+							}
+							return props.info.bandwidth + 'Mbps'
+						}
+						return props.info.bandwidth || '未知'
+					},
+					trafficVol() {
+						if (props.info.trafficVol) {
+							if (props.info.trafficVol > 1000) {
+								return (props.info.trafficVol / 1000).toFixed(2) + 'TB'
+							}
+							return props.info.trafficVol + 'GB'
+						}
+						return props.info.trafficVol || '∞'
+					},
+					calculateRemainingDays() {
+						const billing = props.info?.billing
+						if (!billing) {
+							return '未知'
+						}
+						if (!billing.endDate) {
+							return '长期有效'
+						}
+						const end = new Date(billing.endDate + ' 23:59:59')
+						if (isNaN(end.getTime())) {
+							return billing.endDate
+						}
+						const now = new Date()
+						const diffTime = end - now
+						const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+						return Math.max(0, diffDays) + '天'
+					}
+				}
+			}
+		})
+	}
+	window.registerBillingComponent = registerBillingComponent
+</script>
+
+<!-- 延迟监控统计模板 -->
+<template id="latency-monitor-template">
+	<div class="w-full">
+		<div v-if="loading" class="p-5 text-gray-400 text-sm text-center bg-white/5 rounded-lg">
+			正在加载延迟监控数据...
+		</div>
+		<div v-else-if="error" class="p-5 text-red-400 text-sm text-center bg-red-500/10 rounded-lg"
+			 @click="forceReloadData">
+			延迟监控数据加载失败，点击重试
+		</div>
+		<!-- Monitor Content -->
+		<div v-else-if="monitorData && monitorData.length > 0">
+			<!-- Monitor Stats Grid -->
+			<div class="space-y-3">
+				<div v-for="monitor in processedData" :key="monitor.monitor_id" class="p-1">
+					<div class="flex items-center justify-between mb-2">
+						<div class="font-medium text-gray-300 flex items-center gap-2">
+							<i class="ri-radar-line text-blue-400 text-sm"></i>
+							{{ monitor.monitor_name }}
+						</div>
+						<div class="text-xs text-gray-500">
+							{{ monitor.dataPoints }} 个数据点
+						</div>
+					</div>
+					<!-- Stats Grid -->
+					<div class="grid grid-cols-2 lg:grid-cols-6 gap-2">
+						<!-- 平均延迟 -->
+						<div class="flex flex-col items-center p-2 bg-white/5 rounded-md cursor-help"
+							 :title="getAverageLatencyTooltip(monitor)">
+							<span class="text-xs text-gray-400 mb-1">平均延迟</span>
+							<span class="text-sm font-semibold text-blue-400">
+								{{ monitor.avgLatency }}ms
+							</span>
+						</div>
+						<!-- 丢包率 -->
+						<div class="flex flex-col items-center p-2 bg-white/5 rounded-md cursor-help"
+							 :title="getPacketLossTooltip(monitor)"
+							 :class="monitor.packetLoss > 5 ? 'text-red-400 font-semibold' : monitor.packetLoss > 1 ? 'text-yellow-400' : 'text-green-400'">
+							<span class="text-xs text-gray-400 mb-1">丢包率</span>
+							<span class="text-sm font-semibold"
+								  :class="monitor.packetLoss > 5 ? 'text-red-400' : monitor.packetLoss > 1 ? 'text-yellow-400' : 'text-green-400'">
+								{{ monitor.packetLoss }}%
+							</span>
+						</div>
+						<!-- 最小延迟 -->
+						<div class="flex flex-col items-center p-2 bg-white/5 rounded-md cursor-help"
+							 :title="getMinLatencyTooltip(monitor)">
+							<span class="text-xs text-gray-400 mb-1">最小延迟</span>
+							<span class="text-sm font-semibold text-green-400">
+								{{ monitor.minLatency }}ms
+							</span>
+						</div>
+						<!-- 最大延迟 -->
+						<div class="flex flex-col items-center p-2 bg-white/5 rounded-md cursor-help"
+							 :title="getMaxLatencyTooltip(monitor)">
+							<span class="text-xs text-gray-400 mb-1">最大延迟</span>
+							<span class="text-sm font-semibold text-red-400">
+								{{ monitor.maxLatency }}ms
+							</span>
+						</div>
+						<!-- 延迟中位数 -->
+						<div class="flex flex-col items-center p-2 bg-white/5 rounded-md cursor-help"
+							 :title="getMedianLatencyTooltip(monitor)">
+							<span class="text-xs text-gray-400 mb-1">延迟中位数</span>
+							<span class="text-sm font-semibold text-purple-400">
+								{{ monitor.medianLatency }}ms
+							</span>
+						</div>
+						<!-- 网络抖动 -->
+						<div class="flex flex-col items-center p-2 bg-white/5 rounded-md cursor-help"
+							 :title="getJitterTooltip(monitor)">
+							<span class="text-xs text-gray-400 mb-1">网络抖动</span>
+							<span class="text-sm font-semibold text-orange-400">
+								{{ monitor.jitter }}ms
+							</span>
+						</div>
+					</div>
+					<!-- Network Quality and Stability -->
+					<div class="mt-3 flex items-center justify-between">
+						<div class="flex items-center gap-3">
+							<div class="flex items-center gap-2">
+								<span class="text-xs text-gray-400">网络质量:</span>
+								<span class="px-2 py-1 rounded-md text-xs font-medium shadow-sm shadow-black/30 cursor-help"
+									  :class="getQualityClass(monitor.qualityScore)"
+									  :title="getQualityTooltip(monitor)">
+									{{ getQualityLabel(monitor.qualityScore) }}
+								</span>
+								<span class="text-xs text-gray-500" v-if="monitor.hasEnoughData">
+									({{ monitor.qualityScore }}分)
+								</span>
+							</div>
+							<div v-if="monitor.hasEnoughData" class="flex items-center gap-2">
+								<span class="text-xs text-gray-400">稳定性:</span>
+								<span class="text-xs font-medium cursor-help" :class="monitor.stabilityScore >= 90 ? 'text-green-400' : 
+											  monitor.stabilityScore >= 80 ? 'text-yellow-400' : 'text-red-400'" :title="getStabilityTooltip(monitor)">
+									{{ monitor.stabilityScore }}分
+								</span>
+							</div>
+						</div>
+						<div v-if="monitor.hasEnoughData" class="text-xs text-gray-500 cursor-help"
+							 :title="getAbnormalRateTooltip(monitor)">
+							异常波动: {{ monitor.abnormalRate }}%
+						</div>
+					</div>
+				</div>
+			</div>
+			<!-- 时间范围显示 -->
+			<div v-if="dataTimeRange" class="my-2 text-xs text-gray-500 text-center">
+				数据时间范围: {{ dataTimeRange }}
+			</div>
+		</div>
+		<!-- No Data -->
+		<div v-else class="p-5 text-gray-400 text-sm text-center bg-white/5 rounded-lg">
+			暂无延迟监控数据
+		</div>
+	</div>
+</template>
+
+<!-- 延迟监控统计组件 -->
+<script type="module">
+	window.registerLatencyMonitorComponent = function (app, element, emitter) {
+		const { ref, computed, onMounted, onUnmounted } = Vue
+		app.component('latency-monitor', {
+			template: document.getElementById('latency-monitor-template').innerHTML,
+			props: {
+				server: { type: Object, required: true },
+				info: { type: Object, required: true }
+			},
+			setup(props) {
+				const loading = ref(false)
+				const error = ref(false)
+				const monitorData = ref(null)
+
+				const dataTimeRange = computed(() => {
+					if (!monitorData.value || monitorData.value.length === 0) return ''
+					const allTimestamps = monitorData.value.flatMap(m => m.created_at)
+					if (allTimestamps.length === 0) return ''
+					const earliest = Math.min(...allTimestamps)
+					const latest = Math.max(...allTimestamps)
+					const start = new Date(earliest).toLocaleString('zh-CN', {
+						month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+					})
+					const end = new Date(latest).toLocaleString('zh-CN', {
+						month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+					})
+					return `${start} - ${end}`
+				})
+
+				// 计算标准差
+				const calculateStandardDeviation = (values, mean) => {
+					const variance = values.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / values.length
+					return Math.sqrt(variance)
+				}
+				// 计算网络抖动
+				const calculateJitter = (validDelays) => {
+					if (validDelays.length < 2) return 0
+					let totalJitter = 0
+					for (let i = 1; i < validDelays.length; i++) {
+						totalJitter += Math.abs(validDelays[i] - validDelays[i - 1])
+					}
+					return totalJitter / (validDelays.length - 1)
+				}
+				// 计算稳定性评分
+				const calculateStabilityScore = (validDelays, avgLatency) => {
+					if (validDelays.length < 10) return { score: 0, abnormalRate: 0, details: {} }
+					const mean = parseFloat(avgLatency)
+					const stdDev = calculateStandardDeviation(validDelays, mean)
+					const minDelay = Math.min(...validDelays)
+					const maxDelay = Math.max(...validDelays)
+					const range = maxDelay - minDelay
+
+					// 计算变异系数 (CV = 标准差/平均值)
+					const coefficientOfVariation = stdDev / mean
+
+					// 计算四分位距 (IQR)
+					const sortedDelays = [...validDelays].sort((a, b) => a - b)
+					const q1Index = Math.floor(sortedDelays.length * 0.25)
+					const q3Index = Math.floor(sortedDelays.length * 0.75)
+					const q1 = sortedDelays[q1Index]
+					const q3 = sortedDelays[q3Index]
+					const iqr = q3 - q1
+
+					// 智能异常阈值计算
+					let threshold
+					let methodUsed
+
+					// 方法1：对于变化范围很小的稳定网络（范围<10ms且变异系数<0.1）
+					if (range < 10 && coefficientOfVariation < 0.1) {
+						// 使用更宽松的阈值：平均值 + 3个标准差 或者 Q3 + 1.5*IQR，取较大者
+						const method1 = mean + 3 * stdDev
+						const method2 = q3 + 1.5 * iqr
+						threshold = Math.max(method1, method2, mean + range * 0.8) // 至少是平均值+80%的范围
+						methodUsed = "稳定网络模式"
+					}
+					// 方法2：对于中等变化的网络（范围10-50ms或变异系数0.1-0.3）
+					else if (range <= 50 && coefficientOfVariation <= 0.3) {
+						// 使用四分位距方法：Q3 + 1.5*IQR
+						threshold = q3 + 1.5 * iqr
+						methodUsed = "四分位距方法"
+					}
+					// 方法3：对于变化较大的网络
+					else {
+						// 使用传统方法：平均值 + 2个标准差（比原来的1个标准差更宽松）
+						threshold = mean + 2 * stdDev
+						methodUsed = "标准差方法(2σ)"
+					}
+
+					// 计算异常包
+					const abnormalPackets = validDelays.filter(delay => delay > threshold)
+					const abnormalRate = (abnormalPackets.length / validDelays.length) * 100
+
+					// 计算连续异常情况
+					let consecutiveAbnormal = 0
+					let maxConsecutive = 0
+					validDelays.forEach(delay => {
+						if (delay > threshold) {
+							consecutiveAbnormal++
+							maxConsecutive = Math.max(maxConsecutive, consecutiveAbnormal)
+						} else {
+							consecutiveAbnormal = 0
+						}
+					})
+
+					// 改进的稳定性评分计算
+					let stabilityScore
+
+					// 基础分数：根据变异系数给分
+					let baseScore = 100
+					if (coefficientOfVariation <= 0.02) {
+						baseScore = 100 // 变异系数≤2%，完美稳定
+					} else if (coefficientOfVariation <= 0.05) {
+						baseScore = 95 // 变异系数≤5%，优秀稳定
+					} else if (coefficientOfVariation <= 0.1) {
+						baseScore = 90 // 变异系数≤10%，良好稳定
+					} else if (coefficientOfVariation <= 0.2) {
+						baseScore = 80 // 变异系数≤20%，中等稳定
+					} else {
+						baseScore = 70 // 变异系数>20%，稳定性一般
+					}
+
+					// 异常率扣分（更温和的扣分策略）
+					const abnormalPenalty = Math.min(20, abnormalRate * 0.5) // 异常率惩罚减半，最多扣20分
+
+					// 连续异常扣分（更温和的策略）
+					const consecutivePenalty = Math.min(10, maxConsecutive * 1) // 连续异常每次扣1分，最多扣10分
+
+					// 延迟范围奖励：范围越小奖励越多
+					let rangeBonus = 0
+					if (range <= 5) {
+						rangeBonus = 5 // 范围≤5ms，奖励5分
+					} else if (range <= 10) {
+						rangeBonus = 3 // 范围≤10ms，奖励3分
+					} else if (range <= 20) {
+						rangeBonus = 1 // 范围≤20ms，奖励1分
+					}
+
+					stabilityScore = Math.max(0, Math.min(100, baseScore - abnormalPenalty - consecutivePenalty + rangeBonus))
+
+					return {
+						score: stabilityScore.toFixed(0),
+						abnormalRate: abnormalRate.toFixed(1),
+						details: {
+							mean,
+							stdDev,
+							threshold,
+							abnormalCount: abnormalPackets.length,
+							maxConsecutive,
+							consecutivePenalty,
+							abnormalPenalty,
+							rangeBonus,
+							baseScore,
+							coefficientOfVariation,
+							range,
+							iqr,
+							q1,
+							q3,
+							methodUsed
+						}
+					}
+				}
+				// 计算网络质量综合得分
+				const calculateQualityScore = (avgLatency, packetLoss, stabilityScore) => {
+					// 延迟得分 (0-100)
+					const latencyScore = avgLatency <= 50 ? 100 :
+						avgLatency <= 100 ? 90 :
+							avgLatency <= 200 ? 70 :
+								avgLatency <= 250 ? 50 : 30
+
+					// 丢包得分 (0-100)
+					const lossScore = packetLoss === 0 ? 100 :
+						packetLoss <= 0.5 ? 95 :
+							packetLoss <= 1 ? 85 :
+								packetLoss <= 2 ? 70 :
+									packetLoss <= 5 ? 50 : 20
+
+					// 综合得分 = 丢包40% + 延迟30% + 稳定性30%
+					const totalScore = (lossScore * 0.4 + latencyScore * 0.3 + parseFloat(stabilityScore) * 0.3)
+
+					return {
+						score: totalScore.toFixed(1),
+						details: {
+							latencyScore,
+							lossScore,
+							stabilityScore: parseFloat(stabilityScore)
+						}
+					}
+				}
+
+				const processedData = computed(() => {
+					if (!monitorData.value) return []
+
+					return monitorData.value.map(monitor => {
+						const validDelays = monitor.avg_delay.filter(delay => delay > 0)
+						const totalPoints = monitor.avg_delay.length
+						const lostPackets = totalPoints - validDelays.length
+						const packetLoss = totalPoints > 0 ? ((lostPackets / totalPoints) * 100).toFixed(2) : '0.00'
+
+						// 检查数据是否足够（至少60个数据点，约30分钟）
+						const hasEnoughData = totalPoints >= 60
+
+						if (validDelays.length === 0) {
+							return {
+								...monitor,
+								dataPoints: totalPoints,
+								hasEnoughData,
+								avgLatency: '0.00',
+								minLatency: '0.00',
+								maxLatency: '0.00',
+								medianLatency: '0.00',
+								jitter: '0.00',
+								packetLoss,
+								stabilityScore: '0',
+								abnormalRate: '0.0',
+								qualityScore: '0.0',
+								rawValidDelays: validDelays,
+								rawTotalPoints: totalPoints,
+								rawLostPackets: lostPackets
+							}
+						}
+
+						const avgLatency = (validDelays.reduce((sum, delay) => sum + delay, 0) / validDelays.length).toFixed(2)
+						const minLatency = Math.min(...validDelays).toFixed(2)
+						const maxLatency = Math.max(...validDelays).toFixed(2)
+
+						// 计算中位数
+						const sortedDelays = [...validDelays].sort((a, b) => a - b)
+						const mid = Math.floor(sortedDelays.length / 2)
+						const medianLatency = sortedDelays.length % 2 === 0
+							? ((sortedDelays[mid - 1] + sortedDelays[mid]) / 2).toFixed(2)
+							: sortedDelays[mid].toFixed(2)
+
+						// 计算网络抖动
+						const jitter = calculateJitter(validDelays).toFixed(2)
+
+						// 计算稳定性评分（仅在数据足够时）
+						let stabilityResult = { score: '0', abnormalRate: '0.0', details: {} }
+						if (hasEnoughData) {
+							stabilityResult = calculateStabilityScore(validDelays, avgLatency)
+						}
+
+						// 计算综合质量得分（仅在数据足够时）
+						let qualityResult = { score: '0.0', details: {} }
+						if (hasEnoughData) {
+							qualityResult = calculateQualityScore(parseFloat(avgLatency), parseFloat(packetLoss), stabilityResult.score)
+						}
+
+						return {
+							...monitor,
+							dataPoints: totalPoints,
+							hasEnoughData,
+							avgLatency,
+							minLatency,
+							maxLatency,
+							medianLatency,
+							jitter,
+							packetLoss,
+							stabilityScore: stabilityResult.score,
+							abnormalRate: stabilityResult.abnormalRate,
+							qualityScore: qualityResult.score,
+							rawValidDelays: validDelays,
+							rawTotalPoints: totalPoints,
+							rawLostPackets: lostPackets,
+							stabilityDetails: stabilityResult.details,
+							qualityDetails: qualityResult.details
+						}
+					}).sort((a, b) => a.monitor_name.localeCompare(b.monitor_name))
+				})
+
+				// Tooltip生成函数
+				const getAverageLatencyTooltip = (monitor) => {
+					return `平均延迟: ${monitor.avgLatency}ms\n` +
+						`计算方式: 所有有效延迟值的算术平均数\n` +
+						`有效数据点: ${monitor.rawValidDelays.length}个\n` +
+						`总数据点: ${monitor.rawTotalPoints}个`
+				}
+
+				const getPacketLossTooltip = (monitor) => {
+					return `丢包率: ${monitor.packetLoss}%\n` +
+						`共丢包: ${monitor.rawLostPackets} 次\n` +
+						`有效响应: ${monitor.rawValidDelays.length} 次\n` +
+						`总发送: ${monitor.rawTotalPoints} 次\n` +
+						`计算方式: (丢包次数 ÷ 总发送次数) × 100%`
+				}
+
+				const getMinLatencyTooltip = (monitor) => {
+					const minLatency = parseFloat(monitor.minLatency)
+					const threshold = 10 // 阈值10ms
+					const rangeMin = minLatency
+					const rangeMax = minLatency + threshold
+					const inRangeCount = monitor.rawValidDelays.filter(delay =>
+						delay >= rangeMin && delay <= rangeMax
+					).length
+
+					return `最小延迟: ${monitor.minLatency}ms\n` +
+						`这是所有有效测试中的最低延迟值\n` +
+						`在 ${rangeMin.toFixed(1)}ms - ${rangeMax.toFixed(1)}ms 范围内: ${inRangeCount} 次\n` +
+						`占有效测试的 ${((inRangeCount / monitor.rawValidDelays.length) * 100).toFixed(1)}%`
+				}
+
+				const getMaxLatencyTooltip = (monitor) => {
+					const maxLatency = parseFloat(monitor.maxLatency)
+					const threshold = Math.max(20, maxLatency * 0.1) // 阈值为最大延迟的10%或20ms
+					const rangeMin = maxLatency - threshold
+					const rangeMax = maxLatency
+					const inRangeCount = monitor.rawValidDelays.filter(delay =>
+						delay >= rangeMin && delay <= rangeMax
+					).length
+
+					return `最大延迟: ${monitor.maxLatency}ms\n` +
+						`这是所有有效测试中的最高延迟值\n` +
+						`在 ${rangeMin.toFixed(1)}ms - ${rangeMax.toFixed(1)}ms 范围内: ${inRangeCount} 次\n` +
+						`占有效测试的 ${((inRangeCount / monitor.rawValidDelays.length) * 100).toFixed(1)}%`
+				}
+
+				const getMedianLatencyTooltip = (monitor) => {
+					const sortedDelays = [...monitor.rawValidDelays].sort((a, b) => a - b)
+					const isEven = sortedDelays.length % 2 === 0
+					const mid = Math.floor(sortedDelays.length / 2)
+
+					let explanation = `延迟中位数: ${monitor.medianLatency}ms\n\n` +
+						`算法说明:\n` +
+						`1. 将所有 ${sortedDelays.length} 个有效延迟值从小到大排序\n`
+
+					if (isEven) {
+						explanation += `2. 因为有偶数个数据，取中间两个值的平均数\n` +
+							`3. 第${mid}个值: ${sortedDelays[mid - 1].toFixed(2)}ms\n` +
+							`4. 第${mid + 1}个值: ${sortedDelays[mid].toFixed(2)}ms\n` +
+							`5. 中位数 = (${sortedDelays[mid - 1].toFixed(2)} + ${sortedDelays[mid].toFixed(2)}) ÷ 2 = ${monitor.medianLatency}ms`
+					} else {
+						explanation += `2. 因为有奇数个数据，取正中间的值\n` +
+							`3. 第${mid + 1}个值: ${sortedDelays[mid].toFixed(2)}ms\n` +
+							`4. 中位数 = ${monitor.medianLatency}ms`
+					}
+
+					explanation += `\n\n中位数能更好地反映网络延迟的典型水平，不受极端值影响`
+
+					return explanation
+				}
+
+				const getJitterTooltip = (monitor) => {
+					return `网络抖动: ${monitor.jitter}ms\n\n` +
+						`算法说明:\n` +
+						`1. 计算相邻两次测试延迟的差值绝对值\n` +
+						`2. 将所有差值相加求平均数\n` +
+						`3. 公式: Σ|延迟[i] - 延迟[i-1]| ÷ (测试次数-1)\n\n` +
+						`抖动值越小说明网络越稳定\n` +
+						`< 10ms: 稳定  10-30ms: 一般  >30ms: 不稳定`
+				}
+
+				const getQualityTooltip = (monitor) => {
+					if (!monitor.hasEnoughData) {
+						return `网络质量: 数据不足\n需要至少60个数据点才能准确评估`
+					}
+
+					const details = monitor.qualityDetails
+					return `网络质量: ${getQualityLabel(monitor.qualityScore)} (${monitor.qualityScore}分)\n\n` +
+						`计算方式:\n` +
+						`1. 延迟得分: ${details.latencyScore}分 (权重30%)\n` +
+						`   - ≤50ms:100分  ≤100ms:90分  ≤200ms:70分  ≤250ms:50分  >250ms:30分\n` +
+						`2. 丢包得分: ${details.lossScore}分 (权重40%)\n` +
+						`   - 0%:100分  ≤0.5%:95分  ≤1%:85分  ≤2%:70分  ≤5%:50分  >5%:20分\n` +
+						`3. 稳定性得分: ${details.stabilityScore}分 (权重30%)\n\n` +
+						`综合得分 = ${details.lossScore} × 0.4 + ${details.latencyScore} × 0.3 + ${details.stabilityScore} × 0.3 = ${monitor.qualityScore}分`
+				}
+
+				const getStabilityTooltip = (monitor) => {
+					if (!monitor.hasEnoughData) {
+						return `稳定性: 数据不足\n需要至少60个数据点才能准确评估`
+					}
+
+					const details = monitor.stabilityDetails
+					return `稳定性: ${monitor.stabilityScore}分\n\n` +
+						`评估方法: ${details.methodUsed}\n` +
+						`计算过程:\n` +
+						`1. 基础评分: ${details.baseScore}分 (基于变异系数 ${(details.coefficientOfVariation * 100).toFixed(2)}%)\n` +
+						`2. 延迟范围: ${details.range.toFixed(2)}ms (奖励 ${details.rangeBonus}分)\n` +
+						`3. 异常阈值: ${details.threshold.toFixed(2)}ms\n` +
+						`4. 异常包数量: ${details.abnormalCount}个 (扣分 ${details.abnormalPenalty.toFixed(1)}分)\n` +
+						`5. 最大连续异常: ${details.maxConsecutive}次 (扣分 ${details.consecutivePenalty}分)\n\n` +
+						`最终得分 = ${details.baseScore} + ${details.rangeBonus} - ${details.abnormalPenalty.toFixed(1)} - ${details.consecutivePenalty} = ${monitor.stabilityScore}分\n\n` +
+						`变异系数越小、延迟范围越小表示网络越稳定`
+				}
+
+				const getAbnormalRateTooltip = (monitor) => {
+					if (!monitor.hasEnoughData) {
+						return `异常波动: 数据不足`
+					}
+
+					const details = monitor.stabilityDetails
+					return `异常波动: ${monitor.abnormalRate}%\n\n` +
+						`评估方法: ${details.methodUsed}\n` +
+						`算法说明:\n` +
+						`1. 异常阈值: ${details.threshold.toFixed(2)}ms\n` +
+						`2. 延迟范围: ${details.range.toFixed(2)}ms\n` +
+						`3. 变异系数: ${(details.coefficientOfVariation * 100).toFixed(2)}%\n` +
+						`4. 四分位距: ${details.iqr.toFixed(2)}ms\n` +
+						`5. 超过阈值的包: ${details.abnormalCount}个\n` +
+						`6. 异常率 = ${details.abnormalCount} ÷ ${monitor.rawValidDelays.length} × 100% = ${monitor.abnormalRate}%\n\n` +
+						`智能阈值确保稳定网络不会被误判为异常`
+				}
+
+				const getLatencyData = async (force = false) => {
+					loading.value = true
+					error.value = false
+					monitorData.value = null
+
+					try {
+						const serverId = props.server.ID
+						const cacheKey = `__latency_monitor_cache_${serverId}`
+						const cache = localStorage.getItem(cacheKey)
+
+						if (cache && !force) {
+							const cacheData = JSON.parse(cache)
+							if (Date.now() - cacheData.timestamp < 5 * 60 * 1000) { // 5分钟缓存
+								monitorData.value = cacheData.data
+								loading.value = false
+								return
+							}
+						}
+
+						const response = await fetch(`/api/v1/service/${serverId}`)
+						if (!response.ok) {
+							throw new Error('Network response was not ok')
+						}
+
+						const result = await response.json()
+						if (result.success && result.data) {
+							monitorData.value = result.data
+							localStorage.setItem(cacheKey, JSON.stringify({
+								timestamp: Date.now(),
+								data: result.data
+							}))
+						} else {
+							throw new Error('Invalid data format')
+						}
+					} catch (err) {
+						console.error('Failed to fetch latency data:', err)
+						error.value = true
+					} finally {
+						loading.value = false
+					}
+				}
+				// 根据质量得分获取样式类
+				const getQualityClass = (qualityScore) => {
+					const score = parseFloat(qualityScore)
+					if (score >= 95) {
+						return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' // 极度优秀
+					} else if (score >= 85) {
+						return 'bg-green-500/20 text-green-400 border border-green-500/30' // 优秀
+					} else if (score >= 75) {
+						return 'bg-lime-500/20 text-lime-400 border border-lime-500/30' // 良好
+					} else if (score >= 65) {
+						return 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' // 中等
+					} else if (score >= 55) {
+						return 'bg-orange-500/20 text-orange-400 border border-orange-500/30' // 偏差
+					} else if (score >= 45) {
+						return 'bg-red-400/20 text-red-400 border border-red-400/30' // 较差
+					} else {
+						return 'bg-red-600/20 text-red-300 border border-red-600/30' // 极差
+					}
+				}
+				// 根据质量得分获取标签
+				const getQualityLabel = (qualityScore) => {
+					const score = parseFloat(qualityScore)
+					if (score === 0) {
+						return '数据不足' // 数据不足时显示
+					} else if (score >= 95) {
+						return '极度优秀'
+					} else if (score >= 85) {
+						return '优秀'
+					} else if (score >= 75) {
+						return '良好'
+					} else if (score >= 65) {
+						return '中等'
+					} else if (score >= 55) {
+						return '偏差'
+					} else if (score >= 45) {
+						return '较差'
+					} else {
+						return '极差'
+					}
+				}
+
+				// 监听刷新事件
+				emitter.on('refresh-latency', props.info.id, (id) => {
+					if (id !== props.info.id) return
+					getLatencyData(true)
+				})
+
+				onMounted(async () => {
+					await getLatencyData()
+				})
+				return {
+					monitorData,
+					loading,
+					error,
+					dataTimeRange,
+					processedData,
+					getQualityClass,
+					getQualityLabel,
+					getAverageLatencyTooltip,
+					getPacketLossTooltip,
+					getMinLatencyTooltip,
+					getMaxLatencyTooltip,
+					getMedianLatencyTooltip,
+					getJitterTooltip,
+					getQualityTooltip,
+					getStabilityTooltip,
+					getAbnormalRateTooltip,
+					forceReloadData: () => getLatencyData(true)
+				}
+			}
+		})
+	}
+</script>
+
+
+<!-- IP质量报告模板 -->
+<template id="ip-quality-report-template">
+	<div class="w-full">
+		<div v-if="loading" class="p-5 text-gray-400 text-sm text-center bg-white/5 rounded-lg">
+			正在加载IP质量报告...
+		</div>
+		<div v-else-if="error" class="p-5 text-red-400 text-sm text-center bg-red-500/10 rounded-lg"
+			 @click="forceReloadReport">
+			IP质量报告加载失败...
+		</div>
+
+		<!-- Report Content -->
+		<div v-else-if="reportData">
+			<!-- Basic Info -->
+			<div class="mb-4">
+				<div class="font-semibold text-gray-400 mb-2 flex items-center justify-between gap-1.5 pr-2">
+					<span>📍 基础信息</span>
+					<span class="font-mono text-blue-400 text-sm">{{ reportData.ip }}</span>
+				</div>
+				<div class="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2 mb-3">
+					<div v-for="item in basicInfo" :key="item.label"
+						 class="flex justify-between px-3 py-1.5 bg-white/5 rounded-md">
+						<span class="text-gray-400 font-medium">{{ item.label }}:</span>
+						<span class="text-gray-400 font-semibold font-mono overflow-hidden text-ellipsis whitespace-nowrap flex-1 ml-2 text-right"
+							  :class="item.url ? 'cursor-pointer hover:underline' : ''" @click="openURL(item.url)"
+							  :title="item.value">
+							{{ item.value }}
+						</span>
+					</div>
+				</div>
+			</div>
+
+			<!-- IP Attributes -->
+			<div v-if="reportData.ip_type_attr && reportData.ip_type_attr.length > 0" class="mb-4">
+				<div class="font-semibold text-gray-400 mb-2 flex items-center gap-1.5">🏢 IP属性类型</div>
+				<table class="w-full border-collapse mb-3 bg-white/2 rounded-lg overflow-hidden">
+					<thead>
+						<tr>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold"></th>
+							<th v-for="attr in reportData.ip_type_attr" :key="attr.name"
+								class="bg-white/10 text-gray-400 p-2 text-center font-semibold">
+								{{ attr.name }}
+							</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr>
+							<td class="text-gray-300 font-medium text-left !pl-3 p-1.5 border-b border-white/5">使用类型
+							</td>
+							<td v-for="attr in reportData.ip_type_attr" :key="attr.name"
+								class="p-1.5 text-center border-b border-white/5">
+								<span v-if="attr.use_type"
+									  :class="['px-2 py-1 rounded-md font-medium text-gray-200 text-center text-sm shadow-sm shadow-black/30', getAttrClass(attr.use_type)]">
+									{{ attr.use_type }}
+								</span>
+								<span v-else class="text-gray-400">-</span>
+							</td>
+						</tr>
+						<tr>
+							<td class="text-gray-300 font-medium text-left !pl-3 p-1.5 border-b border-white/5">公司类型
+							</td>
+							<td v-for="attr in reportData.ip_type_attr" :key="attr.name"
+								class="p-1.5 text-center border-b border-white/5">
+								<span v-if="attr.company_type"
+									  :class="['px-2 py-1 rounded-md font-medium text-gray-200 text-center text-sm shadow-sm shadow-black/30', getAttrClass(attr.company_type)]">
+									{{ attr.company_type }}
+								</span>
+								<span v-else class="text-gray-400">-</span>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<!-- Risk Scores -->
+			<div v-if="reportData.risk_score && reportData.risk_score.length > 0" class="mb-4">
+				<div class="font-semibold text-gray-400 mb-2 flex items-center gap-1.5">⚠️ 风险评分</div>
+				<table class="w-full border-collapse mb-3 bg-white/2 rounded-lg overflow-hidden">
+					<thead>
+						<tr>
+							<th class="bg-white/10 text-gray-400 p-2 text-left font-semibold">数据库</th>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">风险等级</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="score in reportData.risk_score" :key="score.name">
+							<td class="text-gray-300 font-medium text-left !pl-3 p-1.5 border-b border-white/5"
+								:class="score.url ? 'cursor-pointer hover:text-blue-400 hover:underline' : ''"
+								@click="score.url && openURL(score.url)">
+								{{ score.name }}
+							</td>
+							<td class="p-1.5 text-center border-b border-white/5">
+								<div class="flex items-center justify-center gap-2">
+									<span :class="['text-sm font-bold', getRiskLevelClass(score)]">
+										{{ score.code || 0 }}
+									</span>
+									<span
+										  :class="['px-2 py-1 rounded-md font-medium text-sm shadow-sm shadow-black/30', getRiskLevelClass(score)]">
+										{{ score.label }}
+									</span>
+								</div>
+							</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<!-- Risk Factors Table -->
+			<div v-if="reportData.risk_factors && reportData.risk_factors.length > 0" class="mb-4">
+				<div class="font-semibold text-gray-400 mb-2 flex items-center gap-1.5">🔍 风险因子检测</div>
+				<table class="w-full border-collapse mb-3 bg-white/2 rounded-lg overflow-hidden">
+					<thead>
+						<tr>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">数据库</th>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">代理</th>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">Tor</th>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">VPN</th>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">服务器</th>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">滥用</th>
+							<th class="bg-white/10 text-gray-400 p-2 text-center font-semibold">机器人</th>
+						</tr>
+					</thead>
+					<tbody>
+						<tr v-for="factor in reportData.risk_factors" :key="factor.name">
+							<td class="text-gray-300 font-medium text-left !pl-3 p-1.5 border-b border-white/5">{{
+								factor.name }}</td>
+							<td
+								:class="['p-1.5 text-center border-b border-white/5', factor.isProxy ? 'text-red-400 font-semibold' : 'text-green-500']">
+								{{ factor.isProxy ? '是' : '否' }}</td>
+							<td
+								:class="['p-1.5 text-center border-b border-white/5', factor.isTor ? 'text-red-400 font-semibold' : 'text-green-500']">
+								{{ factor.isTor ? '是' : '否' }}</td>
+							<td
+								:class="['p-1.5 text-center border-b border-white/5', factor.isVPN ? 'text-red-400 font-semibold' : 'text-green-500']">
+								{{ factor.isVPN ? '是' : '否' }}</td>
+							<td
+								:class="['p-1.5 text-center border-b border-white/5', factor.isServer ? 'text-red-400 font-semibold' : 'text-green-500']">
+								{{ factor.isServer ? '是' : '否' }}</td>
+							<td
+								:class="['p-1.5 text-center border-b border-white/5', factor.isAubse ? 'text-red-400 font-semibold' : 'text-green-500']">
+								{{ factor.isAubse ? '是' : '否' }}</td>
+							<td
+								:class="['p-1.5 text-center border-b border-white/5', factor.isRobot ? 'text-red-400 font-semibold' : 'text-green-500']">
+								{{ factor.isRobot ? '是' : '否' }}</td>
+						</tr>
+					</tbody>
+				</table>
+			</div>
+
+			<!-- Stream Unlock -->
+			<div v-if="reportData.stream_unlock && reportData.stream_unlock.length > 0" class="mb-4">
+				<div class="font-semibold text-gray-400 mb-2 flex items-center gap-1.5">🎬 流媒体解锁</div>
+				<div class="grid grid-cols-2 space-y-1.5">
+					<div v-for="stream in reportData.stream_unlock" :key="stream.name"
+						 class="flex items-center justify-between p-2.5 bg-gradient-to-r from-white/8 to-white/4 rounded-lg border border-white/10 shadow-sm shadow-black/20 hover:from-white/12 hover:to-white/6 transition-all duration-200">
+						<!-- 左侧：图标 + 服务名 -->
+						<div class="flex items-center gap-2.5 min-w-0 flex-1">
+							<img :src="getStreamIcon(stream.name)" :alt="stream.name"
+								 class="w-6 h-6 object-contain rounded-sm flex-shrink-0"
+								 onerror="this.style.display='none'">
+							<span class="text-gray-300 font-medium truncate">{{ stream.name }}</span>
+						</div>
+						<!-- 右侧：状态 + 详细信息 -->
+						<div class="flex items-center gap-2 flex-shrink-0">
+							<!-- 区域和方式 -->
+							<div class="hidden sm:flex items-center gap-1.5 text-xs text-gray-400">
+								<span v-if="stream.area && stream.area !== '未知'"
+									  class="px-1.5 py-0.5 bg-white/10 rounded border border-white/20">
+									{{ stream.area }}
+								</span>
+								<span v-if="stream.method && stream.method !== '未知'"
+									  class="px-1.5 py-0.5 bg-white/10 rounded border border-white/20">
+									{{ stream.method }}
+								</span>
+							</div>
+							<!-- 状态标签 -->
+							<span
+								  :class="['px-2.5 py-1 rounded-md font-medium text-sm shadow-sm shadow-black/30 whitespace-nowrap', getStreamStatusClass(stream.service)]">
+								{{ stream.service }}
+							</span>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Additional Info -->
+			<div class="w-full">
+				<div class="font-semibold text-gray-400 mb-2 flex items-center gap-1.5">📧 附加检测</div>
+				<div class="w-full flex gap-3 items-center">
+					<div
+						 class="w-1/4 p-3 bg-gradient-to-br from-white/10 to-white/5 rounded-lg border border-white/10 shadow-sm shadow-black/20">
+						<div class="text-gray-300 font-medium mb-2 pb-1 border-b border-white/10">邮件端口25</div>
+						<div :class="['text-sm font-semibold px-2 py-1 rounded-md text-center w-[80px]',
+							reportData.mail_25port === '阻断' ?
+							'text-red-500' :
+							'text-green-500']">
+							{{ reportData.mail_25port || '未知' }}
+						</div>
+					</div>
+					<div
+						 class="flex-1 p-3 bg-gradient-to-br from-white/10 to-white/5 rounded-lg border border-white/10 shadow-sm shadow-black/20">
+						<div class="text-gray-300 font-medium mb-2 pb-1 border-b border-white/10">IP黑名单数据库</div>
+						<div v-if="reportData.ip_blacklist" class="flex items-center justify-between gap-2">
+							<div v-for="item in blacklistItems" :key="item.key" class="flex items-center gap-1">
+								<span class="text-gray-400 text-xs">{{ item.label }}</span>
+								<div class="w-[50px] px-2 py-1 rounded-md text-gray-200 text-sm text-center shadow-sm shadow-black/30"
+									 :class="item.colorClass">
+									{{ reportData.ip_blacklist[item.key] }}
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</template>
+
+<!-- IP质量报告 -->
+<script type="module">
+	window.registerIPQualityComponent = function (app, element, emitter) {
+		const { ref, computed, onMounted, onUnmounted, nextTick } = Vue
+		app.component('ip-quality-report', {
+			template: document.getElementById('ip-quality-report-template').innerHTML,
+			props: {
+				server: { type: Object, required: true },
+				info: { type: Object, required: true }
+			},
+			setup(props) {
+				const loading = ref(false)
+				const error = ref(false)
+				const reportData = ref(null)
+
+				const info = props.info
+
+				const basicInfo = computed(() => {
+					if (!reportData.value) return []
+					const data = reportData.value
+					const hash = info.ipCheckReportHash[0]
+					return [
+						{ label: 'ASN', value: data.as, url: `https://bgp.he.net/${data.as}` },
+						{ label: '报告时间', value: data.report_time, url: `https://report.check.place/ip/${hash}.svg` },
+						{ label: '脚本版本', value: data.version, url: `https://github.com/xykt/IPQuality` },
+						{ label: '组织', value: data.organization, url: `https://www.google.com/search?q=${data.organization}` },
+						{ label: '城市', value: data.city, url: `https://www.google.com/search?q=${data.city}` },
+						{ label: '使用地址', value: data.use_address },
+						{ label: '注册地址', value: data.reg_address },
+						{ label: '时区', value: data.time_zone }
+					].filter(item => item.value)
+				})
+
+				const getReportData = async (force = false) => {
+					loading.value = true
+					error.value = false
+					reportData.value = null
+					try {
+						const hash = info.ipCheckReportHash[0]
+						const data = await fetchIPQualityReport(hash)
+						if (!data) {
+							error.value = true
+							return
+						}
+						reportData.value = data
+						const cpuMemGroup = element.querySelector('.custom-server-header-group')
+						if (cpuMemGroup && reportData.value.ip_type) {
+							const ipTypeEl = cpuMemGroup.querySelector('.ip-type')
+							ipTypeEl && ipTypeEl.remove()
+
+							cpuMemGroup.innerHTML = `${cpuMemGroup.innerHTML}
+							<div class="ip-type px-3 py-1 rounded-lg font-semibold text-gray-200 shadow-md shadow-black/30 
+								${reportData.value.ip_type === '原生IP' ? ' bg-gradient-to-br from-green-500 to-green-600' : ' bg-gradient-to-br from-yellow-500 to-yellow-600'}">
+								${reportData.value.ip_type}
+							</div>`
+						}
+						const serverNameEl = element.querySelector('.server-name')
+						if (serverNameEl) {
+
+							let addr = ''
+							if (data.city) {
+								if (data.city === 'N/A') {
+									const arr = data.use_address?.split(',')
+									if (arr?.length) {
+										addr = arr[0].replace(/\[(.*?)\]/, '')
+									}
+								} else {
+									const arr = data.city.split(',')
+									if (arr?.length >= 2) {
+										addr = arr[1]
+									} else if (arr?.length) {
+										addr = arr[0]
+									}
+								}
+							}
+							serverNameEl.innerHTML = `${info.id}. ${info.name}${addr ? ' - ' + addr : ''}`
+						}
+					} catch (err) {
+						error.value = true
+					} finally {
+						loading.value = false
+					}
+				}
+
+				// 监听刷新事件
+				emitter.on('refresh-ipquality', props.info.id, (id) => {
+					if (id !== props.info.id) return
+					getReportData(true)
+				})
+
+				onMounted(async () => getReportData())
+				return {
+					reportData,
+					loading,
+					error,
+					basicInfo,
+					getRiskLevelClass,
+					getAttrClass,
+					getStreamStatusClass,
+					getStreamIcon,
+					blacklistItems,
+					forceReloadReport: () => getReportData(true),
+					openURL: url => {
+						window.open(url, '_blank')
+					}
+				}
+			}
+		})
+	}
+
+	const IPQualityReportBaseURL = 'https://ipq.08310507.xyz'
+	const IconBaseURL = 'https://static.08310507.xyz'
+	const blacklistItems = [
+		{ label: '有效', key: 'valid', colorClass: 'text-green-500' },
+		{ label: '正常', key: 'normal', colorClass: 'text-blue-500' },
+		{ label: '标记', key: 'marked', colorClass: 'text-yellow-500' },
+		{ label: '黑名单', key: 'blacklist', colorClass: 'text-red-500' }
+	]
+
+	function getAttrClass(type) {
+		const redTypes = ['机房', 'CDN', '蜘蛛']
+		const greenTypes = ['住宅', '家宽', '手机', '线路']
+		const purpleTypes = ['教育', '图书馆']
+		const blueTypes = ['商业', '银行']
+		const yellowTypes = ['政府', '组织', '军队', '保留', '其他']
+		if (redTypes.includes(type)) return 'text-red-500'
+		if (greenTypes.includes(type)) return 'text-green-500'
+		if (purpleTypes.includes(type)) return 'text-purple-500'
+		if (blueTypes.includes(type)) return 'text-blue-500'
+		if (yellowTypes.includes(type)) return 'text-yellow-500'
+		return 'text-sky-500'
+	}
+
+	function getStreamStatusClass(service) {
+		if (['原生', '解锁'].includes(service)) return 'text-green-500'
+		if (['屏蔽', '失败', '禁会员', '中国'].includes(service)) return 'text-red-500'
+		if (['仅自制', '仅网页', '仅APP', '机房', 'DNS', '待支持'].includes(service))
+			return 'text-yellow-500'
+		return 'text-gray-500'
+	}
+
+	function getStreamIcon(name) {
+		return `${IconBaseURL}/${name.toLowerCase()}.png`
+	}
+
+	// Fetch IP quality report
+	async function fetchIPQualityReport(hash, force = false) {
+		try {
+			const cacheKey = '__ip_quality_report_cache_' + hash
+			const cache = localStorage.getItem(cacheKey)
+			if (cache && !force) {
+				const cacheData = JSON.parse(cache)
+				if (cacheData.hash === hash) {
+					return cacheData.data
+				}
+			}
+			const response = await fetch(`${IPQualityReportBaseURL}/?type=ip-check-report&hash=${hash}`)
+			if (!response.ok) {
+				throw new Error('Network response was not ok')
+			}
+			const data = await response.json()
+			// 设置风险评分URL
+			for (const risk_score of data.risk_score) {
+				risk_score.url = ''
+				switch (risk_score.name.toLowerCase()) {
+					case 'scamalytics':
+						risk_score.url = `https://scamalytics.com/ip`
+						break
+					case 'ipapi':
+						risk_score.url = `https://ipapi.com/ip_api.php`
+						break
+					case 'abuseipdb':
+						risk_score.url = `https://abuseipdb.com/check`
+						break
+					case 'ipqs':
+						//risk_score.url = `https://ipqualityscore.com/api/json/ip/lPnx5AhAUv4jgIFDXquYpe8CVBjmaTii/${data.ip}`
+						break
+					case 'cloudflare':
+						risk_score.url = `https://ip.nodeget.com/json`
+						break
+					case 'dbip':
+						risk_score.url = `https://db-ip.com`
+						break
+				}
+			}
+			localStorage.setItem(cacheKey, JSON.stringify({ hash, data }))
+			return data
+		} catch (err) {
+			console.error('Failed to fetch IP quality report:', err)
+			return null
+		}
+	}
+
+	function getRiskLevelClass(riskScore) {
+		const label = riskScore.label
+		switch (label) {
+			case '极低风险':
+			case '低风险':
+				return 'text-green-500'
+			case '中风险':
+			case '较高风险':
+			case '可疑IP':
+				return 'text-yellow-500'
+			case '高风险':
+			case '存在风险':
+				return 'text-red-500'
+			case '极高风险':
+			case '建议封禁':
+				return 'text-red-600'
+			default:
+				return 'text-green-500'
+		}
+	}
+</script>
+
+<!-- 服务器详情面板模板 -->
+<template id="server-detail-panel-template">
+	<div class="relative m-3 group" v-if="availableTabs.length > 0">
+		<div class="custom-panel cursor-default p-4">
+			<!-- 账单信息 -->
+			<div class="mb-4">
+				<billing-info :server="server" :info="info"></billing-info>
+			</div>
+			<!-- Tab 切换器 -->
+			<div class="flex justify-between items-center mb-4 pb-3 border-b-2 border-white/10">
+				<div class="flex gap-2">
+					<button v-for="tab in availableTabs" :key="tab.key" @click="switchTab(tab.key)" :class="['px-3 py-1.5 rounded-md text-sm font-medium',
+						activeTab === tab.key 
+						? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' 
+						: 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-gray-300']">
+						<i :class="tab.icon" class="mr-1"></i>
+						{{ tab.label }}
+					</button>
+				</div>
+				<div class="text-sm text-gray-400 cursor-pointer hover:text-gray-300" title="刷新当前页面"
+					 @click="refreshActiveTab">
+					<i class="ri-restart-line"></i>
+				</div>
+			</div>
+			<!-- 内容区域 -->
+			<div ref="panelContent" @scroll="checkScrollbar" class="w-full overflow-y-auto"
+				 :class="isExpanded ? 'max-h-none' : 'max-h-[300px]'">
+				<!-- 延迟监控 -->
+				<div v-show="activeTab === 'latency'" v-if="hasLatencyData">
+					<latency-monitor :server="server" :info="info"></latency-monitor>
+				</div>
+				<!-- IP质量报告 -->
+				<div v-show="activeTab === 'ipquality'" v-if="hasIPReport">
+					<ip-quality-report :server="server" :info="info"></ip-quality-report>
+				</div>
+			</div>
+		</div>
+		<!-- 展开/收起按钮 -->
+		<div v-if="(hasScrollbar && !isExpanded && !scrollbarIsBottom) || isExpanded"
+			 class="absolute bottom-0 left-0 right-0 py-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200 bg-gradient-to-t from-black/70 to-black/10 pointer-events-none rounded-b-xl">
+			<button @click="toggleExpand"
+					class="w-full h-8 flex items-center justify-center bg-black/30 hover:bg-black/50 text-gray-300 transition-all duration-200 rounded-md cursor-pointer pointer-events-auto">
+				<span v-if="isExpanded">收起内容</span>
+				<span v-else>展开全部</span>
+				<i :class="[isExpanded ? 'ri-arrow-up-line' : 'ri-arrow-down-line']"></i>
+			</button>
+		</div>
+	</div>
+</template>
+
+<!-- 服务器详情面板组件 -->
+<script type="module">
+	window.registerServerDetailPanelComponent = function (app, element, emitter) {
+		const { ref, computed, onMounted, nextTick } = Vue
+		app.component('server-detail-panel', {
+			template: document.getElementById('server-detail-panel-template').innerHTML,
+			props: {
+				server: { type: Object, required: true },
+				info: { type: Object, required: true }
+			},
+			setup(props) {
+				const panelContent = ref(null)
+				const hasScrollbar = ref(false)
+				const isExpanded = ref(false)
+				const scrollbarIsBottom = ref(false)
+				const activeTab = ref('')
+				// 检查各组件的可用性
+				const hasBilling = computed(() => !!props.info.billing)
+				const hasLatencyData = computed(() => true)
+				const hasIPReport = computed(() => props.info.ipCheckReportHash?.length > 0)
+				// 所有可能的tab定义
+				const allTabs = [
+					{ key: 'latency', label: '延迟监控', icon: 'ri-pulse-line', condition: hasLatencyData },
+					{ key: 'ipquality', label: 'IP质量', icon: 'ri-shield-check-line', condition: hasIPReport }
+				]
+				// 可用的tabs
+				const availableTabs = computed(() => allTabs.filter(tab => tab.condition.value))
+				// 设置默认活跃tab
+				const initializeActiveTab = () => {
+					if (availableTabs.value.length > 0) {
+						activeTab.value = availableTabs.value[0].key
+					}
+				}
+				// 监听全局tab切换事件
+				emitter.on('change-active-tab', props.info.id, (newTab) => {
+					// 只有当前面板有这个tab时才切换
+					if (availableTabs.value.some(tab => tab.key === newTab)) {
+						activeTab.value = newTab
+						nextTick(() => {
+							checkScrollbar()
+						})
+					}
+				})
+				// 切换tab
+				const switchTab = (tabKey) => {
+					activeTab.value = tabKey
+					// 广播给所有面板
+					emitter.emit('change-active-tab', tabKey)
+					nextTick(() => {
+						checkScrollbar()
+					})
+				}
+				let lastScrollTop = 0
+				// 切换展开/收起状态
+				const toggleExpand = () => {
+					if (!isExpanded.value) {
+						lastScrollTop = document.documentElement.scrollTop
+					}
+					isExpanded.value = !isExpanded.value
+					nextTick(() => {
+						if (!isExpanded.value) {
+							document.documentElement.scrollTo(0, lastScrollTop)
+						}
+						checkScrollbar()
+					})
+				}
+				// 检测是否有滚动条
+				const checkScrollbar = () => {
+					if (!panelContent.value) return
+					const element = panelContent.value
+					hasScrollbar.value = element.scrollHeight > element.clientHeight
+					scrollbarIsBottom.value = Math.abs(element.scrollHeight - (element.scrollTop + element.clientHeight)) < 10
+						|| element.scrollHeight === element.clientHeight
+				}
+				// 刷新当前活跃的tab
+				const refreshActiveTab = () => {
+					switch (activeTab.value) {
+						case 'latency':
+							emitter.emit('refresh-latency', props.info.id)
+							break
+						case 'ipquality':
+							emitter.emit('refresh-ipquality', props.info.id)
+							break
+					}
+				}
+				onMounted(() => {
+					initializeActiveTab()
+					window.addEventListener('resize', checkScrollbar)
+					nextTick(() => setTimeout(checkScrollbar, 200))
+				})
+				return {
+					panelContent,
+					hasScrollbar,
+					isExpanded,
+					scrollbarIsBottom,
+					activeTab,
+					availableTabs,
+					hasBilling,
+					hasLatencyData,
+					hasIPReport,
+					switchTab, // 使用新的switchTab方法
+					toggleExpand,
+					checkScrollbar,
+					refreshActiveTab
+				}
+			}
+		})
+	}
+</script>
+
+<template id="custom-server-display-template">
+	<server-detail-panel :server="server" :info="info"></server-detail-panel>
+</template>
+
+<script type="module">
+	// @ts-nocheck
+	// hook vuex store
+	function hookStore(action, cb) {
+		const old = document.querySelector('#app').__vue_app__._context.provides.store._mutations[action][0]
+		document.querySelector('#app').__vue_app__._context.provides.store._mutations[action][0] = function (servers) {
+			if (cb(servers, old)) return
+			old(servers)
+		}
+	}
+
+	// ws 收到更新消息会调用此函数，hook
+	hookStore('UPDATE_SERVERS', (servers, old) => {
+		old(servers)
+		setTimeout(() => handleServerDisplay(servers), 100)
+		return true
+	})
+
+	async function createIPQualityReport(server, info, emitter, contentContainer, element, exchangeRateMap) {
+		const { createApp, ref, computed } = Vue
+		const app = createApp({
+			setup() {
+				// 转换为响应式对象
+				const serverRef = ref(server)
+				const infoRef = ref(info)
+				return {
+					server: serverRef,
+					info: infoRef
+				}
+			}
+		})
+		window.registerServerDetailPanelComponent?.(app, element, emitter)
+		window.registerIPQualityComponent?.(app, element, emitter)
+		window.registerLatencyMonitorComponent?.(app, element, emitter)
+		window.registerBillingComponent?.(app, element, emitter, exchangeRateMap)
+		app.mount(contentContainer)
+	}
+
+	// 保存上次服务器列表
+	let oldLastServers = []
+	async function handleServerDisplay(servers) {
+		// 如果服务器列表没有变化，则不进行处理
+		if (oldLastServers.length === servers.length) {
+			return
+		}
+		oldLastServers = servers
+		// 通过元素获取vue实例
+		const appElement = document.querySelector('#app')
+		if (!appElement || !appElement.__vue_app__) return
+
+		const app = appElement.__vue_app__
+		// 拿到 vue router 的 route name
+		const routeName = app.config.globalProperties.$route.name
+		// 如果 route name 不是 Home，则不进行处理
+		if (routeName !== 'Home') {
+			return
+		}
+		const emitter = {
+			events: {},
+			on(type, key, handle) {
+				if (!emitter.events[type]) {
+					emitter.events[type] = {}
+				}
+				emitter.events[type][key + ''] = handle
+			},
+			emit(type, args) {
+				if (!emitter.events[type]) {
+					return
+				}
+				for (const key in emitter.events[type]) {
+					try {
+						emitter.events[type][key](args)
+					} catch {
+					}
+				}
+			}
+		}
+		// 从 store 里拿到服务器列表
+		const serverList = app.config.globalProperties.$store._state.data.serverList
+		// 获取服务器元素列表
+		const serverElements = document.querySelectorAll('div.server-list-container.server-list--card > div.server-list-item')
+		// 获取汇率
+		const exchangeRateMap = await getExchangeRateMap()
+		// 遍历服务器元素列表
+		for (let index = 0; index < serverElements.length; index++) {
+			// 拿到服务器元素
+			const element = serverElements[index]
+			// 如果服务器列表中没有这个服务器，则不进行处理
+			if (!serverList[index]) continue
+
+			// 拿到服务器
+			const server = serverList[index]
+			// 拿到服务器信息
+			const info = window.__ServerInfo.find(s => s.id === server.ID)
+			// 如果服务器信息为空，则不进行处理
+			if (!info) continue
+			// 先移除已存在的自定义内容
+			const existingContent = element.querySelector('.custom-server-display')
+			if (existingContent && existingContent.parentElement) {
+				existingContent.parentElement.remove()
+			} else {
+				// 替换整个计费信息显示块
+				const billingBlock = element.querySelector('.server-list-item-bill')
+				billingBlock && billingBlock.remove()
+			}
+			// 修改CPU、内存、磁盘显示
+			const coreMemGroup = element.querySelector('.cpu-mem-group')
+			if (coreMemGroup) {
+				const match = coreMemGroup.innerText.match(/(\d+(?:\.\d+)?)C(\d+(?:\.\d+)?)G(\d+(?:\.\d+)?)G/)
+				if (match) {
+					const CPU = parseFloat(match[1])
+					const Mem = parseFloat(match[2])
+					const Disk = parseFloat(match[3])
+					coreMemGroup.innerHTML = ''
+					const cpuMemGroup = document.createElement('div')
+					cpuMemGroup.className = 'custom-server-header-group flex items-center gap-2 text-white'
+					cpuMemGroup.innerHTML = `
+					<div class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gradient-to-r from-blue-600/70 to-blue-500/50 hover:from-blue-500/80 hover:to-blue-400/60 transition-all duration-200 border border-white/10 shadow-sm shadow-black/20 group">
+						<i class="ri-cpu-line text-white"></i>
+						<span class="font-semibold">${CPU}<span class="text-xs ml-0.5 opacity-80">核</span></span>
+					</div>
+					<div class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gradient-to-r from-green-600/70 to-green-500/50 hover:from-green-500/80 hover:to-green-400/60 transition-all duration-200 border border-white/10 shadow-sm shadow-black/20 group">
+						<i class="ri-ram-fill text-white"></i>
+						<span class="font-semibold">${Mem}<span class="text-xs ml-0.5 opacity-80">G</span></span>
+					</div>
+					<div class="flex items-center gap-1 px-2 py-1 rounded-lg bg-gradient-to-r from-purple-600/70 to-purple-500/50 hover:from-purple-500/80 hover:to-purple-400/60 transition-all duration-200 border border-white/10 shadow-sm shadow-black/20 group">
+						<i class="ri-hard-drive-3-fill text-white"></i>
+						<span class="font-semibold">${Disk}<span class="text-xs ml-0.5 opacity-80">G</span></span>
+					</div>`
+					coreMemGroup.appendChild(cpuMemGroup)
+				}
+			}
+			// 创建自定义内容容器
+			const contentContainer = document.createElement('div')
+			contentContainer.className = 'custom-server-display w-full'
+			contentContainer.innerHTML = document.getElementById('custom-server-display-template').innerHTML
+			// 将自定义内容容器添加到服务器元素尾部
+			element.appendChild(contentContainer)
+			try {
+				// 更新服务器详情
+				createIPQualityReport(server, info, emitter, contentContainer, element, exchangeRateMap)
+			} catch (e) {
+				console.error('Failed to create IP quality report:', e)
+			}
+		}
+	}
+
+	async function getExchangeRateMap() {
+		try {
+			const res = await fetch('https://latest.currency-api.pages.dev/v1/currencies/usd.json')
+			if (res.ok) {
+				return (await res.json()).usd
+			}
+		} catch { }
+		return undefined
+	}
+</script>
+
+<style>
+	.server-list-container {
+		--list-item-num: 2 !important;
+	}
+
+	.max-w-5xl {
+		max-width: 1440px !important;
+	}
+
+	table tbody .max-w-24 {
+		max-width: none !important;
+	}
+
+	/* .world-map-group--light-background {
+		background: none !important;
+	} */
+
+	.server-info-box {
+		display: flex !important;
+		flex-direction: row !important;
+		flex-wrap: wrap !important;
+		gap: 10px !important;
+		justify-content: space-between !important;
+	}
+
+	.server-info-group {
+		width: 45% !important;
+	}
+
+	.server-list-item-head {
+		width: 100% !important;
+	}
+
+	.server-info-tag-list {
+		flex-wrap: wrap;
+	}
+
+	::-webkit-scrollbar {
+		width: 6px;
+	}
+
+	::-webkit-scrollbar:horizontal {
+		height: 6px;
+	}
+
+	::-webkit-scrollbar-track {
+		border-radius: 10px;
+	}
+
+	::-webkit-scrollbar-thumb {
+		background-color: #fff3;
+		border-radius: 10px;
+		transition: all 0.2s ease-in-out;
+	}
+
+	::-webkit-scrollbar-thumb:hover {
+		cursor: pointer;
+		background-color: #fff6;
+	}
+
+	.dot-dot-box {
+		background-color: #000c !important;
+	}
+</style>
